@@ -1,15 +1,16 @@
-import streamlit as st
-from fpdf import FPDF
-import pandas as pd
-from pymongo import MongoClient
-from datetime import datetime
 import tempfile
+import pandas as pd
+from fpdf import FPDF
+import streamlit as st
+from datetime import datetime
+from pymongo import MongoClient
 
 # ---------- MongoDB Setup ----------
-mongo_uri = "mongodb://localhost:27017"  # Replace with your URI if needed
+mongo_uri = "mongodb://localhost:27017"
 client = MongoClient(mongo_uri)
 db = client["concrete_app"]
 feedback_col = db["feedbacks"]
+recipient_col = db["recipient_emails"]
 
 # ---------- Session State Defaults ----------
 if "show_share_form" not in st.session_state:
@@ -17,43 +18,38 @@ if "show_share_form" not in st.session_state:
 if "show_feedback_form" not in st.session_state:
     st.session_state["show_feedback_form"] = False
 
-# ---------- Page Styling ----------
+# ---------- Styling (Dark/Light Mode Friendly) ----------
 st.markdown("""
     <style>
     html, body, [class*="css"] {
         font-family: 'Segoe UI', sans-serif;
-        background-color: #f9f9f9;
-        color: #2c3e50;
     }
     .stButton>button {
-        background-color: #2c3e50;
+        background-color: #336699;
         color: white;
         padding: 8px 20px;
         border-radius: 5px;
         font-size: 16px;
         transition: background-color 0.3s ease;
+        border: none;
     }
     .stButton>button:hover {
-        background-color: #1a242f;
-    }
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
+        background-color: #25476a;
     }
     h1, h2, h3 {
-        color: #1f77b4;
+        color: inherit !important;
     }
     .stForm {
-        border: 1px solid #ddd;
+        border: 1px solid rgba(128, 128, 128, 0.3);
         padding: 20px;
         border-radius: 8px;
-        background-color: #ffffff;
+        background-color: rgba(255, 255, 255, 0.05);
     }
     </style>
 """, unsafe_allow_html=True)
 
-# ---------- Sidebar: Share + Feedback ----------
-st.sidebar.markdown("## 📤 Share This App")
+# ---------- Sidebar Forms ----------
+st.sidebar.markdown("## Share This App")
 if st.sidebar.button("Open Share Form"):
     st.session_state["show_share_form"] = not st.session_state["show_share_form"]
 
@@ -63,12 +59,19 @@ if st.session_state["show_share_form"]:
         share_submit = st.form_submit_button("Send")
         if share_submit:
             if share_email.strip():
-                st.success(f"✅ App link shared to {share_email} (simulation).")
+                try:
+                    recipient_col.insert_one({
+                        "recipient": share_email.strip(),
+                        "shared_at": datetime.utcnow()
+                    })
+                    st.success(f"✅ App link shared to {share_email} (simulated and saved).")
+                except Exception:
+                    st.error("❌ Failed to save recipient email.")
             else:
                 st.warning("⚠️ Please enter a valid email.")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("## 💬 Leave Feedback")
+st.sidebar.markdown("## Leave Feedback")
 if st.sidebar.button("Open Feedback Form"):
     st.session_state["show_feedback_form"] = not st.session_state["show_feedback_form"]
 
@@ -79,39 +82,41 @@ if st.session_state["show_feedback_form"]:
         fb_submit = st.form_submit_button("Submit")
         if fb_submit:
             if user.strip() and comment.strip():
-                if feedback_col is not None:
-                    try:
-                        feedback_col.insert_one({
-                            "user": user.strip(),
-                            "comment": comment.strip(),
-                            "submitted_at": datetime.utcnow()
-                        })
-                        st.success("✅ Thank you for your feedback!")
-                    except:
-                        st.error("❌ Failed to submit feedback.")
-                else:
-                    st.warning("⚠️ MongoDB not connected. Feedback not saved.")
+                try:
+                    feedback_col.insert_one({
+                        "user": user.strip(),
+                        "comment": comment.strip(),
+                        "submitted_at": datetime.utcnow()
+                    })
+                    st.success("✅ Thank you for your feedback!")
+                except:
+                    st.error("❌ Failed to submit feedback.")
             else:
                 st.warning("⚠️ Please complete all fields.")
 
 # ---------- Header ----------
-st.markdown("<h1 style='text-align: center;'>Concrete Core Strength Evaluator</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; font-size:16px; color: #555;'>IS 516-compliant evaluation tool</p>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>Concrete Core Compression Strength</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size:16px;'>IS 516-compliant evaluation tool</p>", unsafe_allow_html=True)
 st.markdown("---")
 
 # ---------- Input Form ----------
 with st.form("core_input_form"):
+    st.markdown("### Enter Core Test Values")
     col1, col2 = st.columns(2)
 
     with col1:
-        core_diameter = st.number_input("Core Diameter (mm) – e.g., 68.00", min_value=1.0, value=68.0)
-        load_kn = st.number_input("Load Applied (kN) – e.g., 175.00", min_value=0.1, value=175.0)
+        core_diameter = st.number_input("Core Diameter (in mm)", min_value=1.0, value=68.0,
+                                        help="Measured diameter of the concrete core sample")
+        load_kn = st.number_input("Load Applied (in kN)", min_value=0.1, value=175.0,
+                                  help="Compressive load at failure")
 
     with col2:
-        core_length = st.number_input("Core Length (mm) – e.g., 132.00", min_value=1.0, value=132.0)
-        grade_mpa = st.number_input("Concrete Grade (MPa) – e.g., 50.00", min_value=1.0, value=50.0)
+        core_length = st.number_input("Core Length (in mm)", min_value=1.0, value=132.0,
+                                      help="Measured length of the core")
+        grade_mpa = st.number_input("Concrete Grade (in MPa)", min_value=1.0, value=50.0,
+                                    help="Target concrete strength")
 
-    submit_button = st.form_submit_button("Evaluate Strength")
+    submit_button = st.form_submit_button("🚀 Evaluate Strength")
 
 # ---------- Evaluation Logic ----------
 if submit_button:
@@ -129,25 +134,25 @@ if submit_button:
     percent_strength = round((cube_equivalent_strength / grade_mpa) * 100, 2)
     required_strength = round(0.75 * grade_mpa, 2)
     status = "✅ PASS" if corrected_strength >= required_strength else "❌ FAIL"
-    status_color = "#dff0d8" if "PASS" in status else "#f2dede"
-    status_text_color = "#3c763d" if "PASS" in status else "#a94442"
+    status_color = "#d4edda" if "PASS" in status else "#f8d7da"
+    status_text_color = "#155724" if "PASS" in status else "#721c24"
 
     # ---------- Summary ----------
     st.markdown("---")
-    st.markdown("<h3 style='color:#1f77b4;'>Evaluation Summary</h3>", unsafe_allow_html=True)
+    st.markdown("<h3>Evaluation Summary</h3>", unsafe_allow_html=True)
     st.markdown(
-        f"<p style='font-size:15px; color:#333;'>L/D Ratio: <strong>{ld_ratio:.2f}</strong> | Diameter Correction Factor: <strong>{dia_correction_factor}</strong> | Graph Factor: <strong>{graph_correction_factor}</strong></p>",
+        f"<p>L/D Ratio: <strong>{ld_ratio:.2f}</strong> | Diameter Correction: <strong>{dia_correction_factor}</strong> | Graph Factor: <strong>{graph_correction_factor}</strong></p>",
         unsafe_allow_html=True
     )
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Raw Strength", f"{raw_strength:.2f} MPa")
-    col2.metric("After Dia Correction", f"{corrected_strength:.2f} MPa")
-    col3.metric("After Graph Correction", f"{graph_corrected_strength:.2f} MPa")
+    col2.metric("Dia Corrected", f"{corrected_strength:.2f} MPa")
+    col3.metric("Graph Corrected", f"{graph_corrected_strength:.2f} MPa")
 
     col4, col5 = st.columns(2)
     col4.metric("Cube Equivalent", f"{cube_equivalent_strength:.2f} MPa")
-    col5.metric("% Strength vs Grade", f"{percent_strength:.2f} %")
+    col5.metric("Strength %", f"{percent_strength:.2f} %")
 
     st.markdown(f"""
         <div style="padding: 12px; border-radius: 8px; background-color: {status_color}; color: {status_text_color}; text-align: center;">
@@ -207,7 +212,8 @@ if submit_button:
         def body(self, data):
             self.set_font("Arial", "", 10)
             for k, v in data.items():
-                self.cell(0, 10, f"{k}: {v}", ln=True)
+                self.cell(80, 10, f"{k}", border=1)
+                self.cell(0, 10, f"{v}", border=1, ln=True)
 
     pdf = PDF()
     pdf.add_page()
